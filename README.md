@@ -1,78 +1,69 @@
-# Multi-Modal RAG (Retrieval-Augmented Generation)
+# MultiModal RAG (SOTA MVP)
 
-This project implements a Multi-Modal RAG system that can process and retrieve information from various formats, including text and images, using advanced AI models like Gemini 1.5.
+A production-grade MultiModal RAG (Retrieval-Augmented Generation) system designed to retrieve and reason across **text, diagrams, and web content**. Optimized for technical documentation (AWS/Azure) with a **Local-First** architecture.
 
-## Project Overview
+## 🚀 Key Features (SOTA Implementation)
 
-Traditional RAG systems are often limited to text-in and text-out. This system shifts that paradigm by incorporating multi-modal context (text, images, etc.) into the retrieval and synthesis process.
+- **🖼️ Multi-Vector Ingestion:** Automatically extracts and captions images from PDFs using **LLava (Ollama)** or **Gemini**.
+- **🔍 Two-Stage Retrieval:** 
+    1. **Vector Search:** Fast initial retrieval of top 10 candidates.
+    2. **BGE Reranker:** Cross-Encoder reranking to pick the top 5 most relevant nodes for extreme precision.
+- **💾 Incremental Ingestion:** Uses an **MD5 Manifest System** to skip already-processed files, making updates near-instant.
+- **🌐 Recursive Web Ingestion:** Crawls depth=1 documentation links found in PDFs using **Trafilatura** for clean text extraction.
+- **🤖 Local-First Architecture:** Supports **Ollama** (Llama 3.2 + LLava) for free, unlimited development without API rate limits.
 
-### Key Features
+## 🛠️ Tech Stack
 
-- **Unified Embedding Space:** Captures nuances across different modalities for more robust retrieval.
-- **Multimodal Retrieval:** Performs similarity searches against a vector database (Qdrant) containing text chunks and image metadata.
-- **Multimodal LLM Synthesis:** Uses Gemini 1.5 Pro/Flash to synthesize answers from both retrieved text and visual data.
-- **Efficient Ingestion:** Extracts text and images from PDF documents for processing and indexing.
+- **LLM / Vision:** Ollama (Local) or Gemini 1.5 Flash (Cloud).
+- **Reranker:** `BAAI/bge-reranker-base` (Local).
+- **Vector Database:** Qdrant (Local).
+- **Orchestration:** LlamaIndex.
+- **UI:** Streamlit.
 
-## Tech Stack
+## 📦 Getting Started
 
-- **LLM:** Google Gemini 1.5 (Pro/Flash)
-- **Vector Database:** Qdrant
-- **Framework:** Streamlit (for the UI)
-- **Orchestration:** Python-based ingestion and retrieval logic
-- **Libraries:** `google-generativeai`, `qdrant-client`, `pypdfium2`, etc.
-
-## Getting Started
-
-### Prerequisites
-
+### 1. Prerequisites
 - Python 3.10+
-- A Google Gemini API Key
+- [Ollama](https://ollama.com/) (for local inference)
+- [Qdrant](https://qdrant.tech/)
 
-### Installation
+### 2. Setup
+```bash
+# Clone the repo
+git clone <your-repo-url>
+cd multi-modal-rag
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/ParthMuley/Muti_Modal_RAG.git
-   cd Muti_Modal_RAG
-   ```
+# Install dependencies
+pip install -r requirements.txt
 
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
+# Pull local models
+ollama pull llama3.2:3b
+ollama pull llava:7b
+```
 
-3. Set up environment variables:
-   Create a `.env` file in the root directory and add your Gemini API key:
-   ```env
-   GOOGLE_API_KEY=your_api_key_here
-   ```
+### 3. Configuration
+Copy `.env.example` to `.env` and set your preferred provider:
+```env
+MODEL_PROVIDER=OLLAMA # Options: OLLAMA, GEMINI
+GOOGLE_API_KEY=your_key_here
+```
 
-### Usage
+### 4. Run the Pipeline
+```bash
+# 1. Scrape recursive links from PDFs
+python web_ingest.py
 
-1. **Ingest Data:**
-   Run the ingestion script to process your PDF documents:
-   ```bash
-   python ingest.py
-   ```
+# 2. Ingest PDFs, Images, and Web Content
+python ingest.py
 
-2. **Run the App:**
-   Start the Streamlit interface:
-   ```bash
-   streamlit run app.py
-   ```
+# 3. Start the UI
+streamlit run app.py
+```
 
-## Implementation Strategy
-
-The project follows a "Stable & Precise" native multimodal approach:
-- **Flow:** Uses a Multi-Vector Retriever, storing high-dimensional embeddings in a vector database.
-- **Pros:** High fidelity; allows the LLM to perform its own reasoning on the visual data.
-
-## Architectural Trade-offs
-
-| Component | Choice | Key Advantage |
-| :--- | :--- | :--- |
-| **LLM** | Gemini 1.5 | Massive 2M token context window; native multimodal reasoning. |
-| **Vector DB** | Qdrant | Scalable and efficient similarity search for high-dimensional vectors. |
+## 🧠 Architectural Decisions
+- **Caption Caching:** All image descriptions are cached in `caption_cache.json` to avoid re-running expensive vision models.
+- **Hybrid Context:** The system blends local technical diagrams with live web content for a unified "Knowledge Assistant" experience.
+- **BGE Reranking:** Mandatory for technical docs where simple vector similarity often retrieves the wrong service (e.g., S3 vs S3 Glacier).
 
 ---
-*For more detailed theoretical background, refer to the [readme.pdf](./readme.pdf).*
+*Developed as a high-performance RAG MVP.*

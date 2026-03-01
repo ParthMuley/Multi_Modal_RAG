@@ -1,113 +1,134 @@
 import streamlit as st
 import os
 import qdrant_client
-from dotenv import load_dotenv
-from llama_index.core import VectorStoreIndex
+from llama_index.core import VectorStoreIndex, StorageContext
 from llama_index.vector_stores.qdrant import QdrantVectorStore
+from llama_index.core.postprocessor import SentenceTransformerRerank
 from ingest import setup_settings
+from config import QDRANT_PATH, COLLECTION_NAME, MODEL_PROVIDER, RERANK_MODEL_NAME
 
-# Load environment variables
-load_dotenv()
+# --- Streamlit UI Setup ---
+st.set_page_config(
+    page_title="SOTA MultiModal RAG", 
+    page_icon="🤖", 
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Sidebar Configuration
+with st.sidebar:
+    st.title("⚙️ RAG Configuration")
+    st.info(f"**Main Model:** {MODEL_PROVIDER}")
+    st.info(f"**Reranker:** {RERANK_MODEL_NAME.split('/')[-1]}")
+    st.write("---")
+    st.markdown("""
+    ### 🛡️ SOTA Features:
+    - **Cross-Encoder Reranking:** Filters top 10 results down to 5.
+    - **Multi-Vector Retrieval:** Search image descriptions.
+    - **Local-First:** Ollama/Llama3.2 for reasoning.
+    """)
+    
+    if st.button("🔄 Clear Chat History"):
+        st.session_state.messages = []
+        st.rerun()
+
+st.title("🤖 MultiModal RAG Assistant (SOTA Edition)")
+st.markdown(f"**Current State:** 🚀 *Reranker Enabled* | *Provider:* {MODEL_PROVIDER}")
 
 def initialize_engine():
-    """Initializes the query engine pointing to the local Qdrant database."""
+    """Initializes the query engine with Qdrant + SOTA Reranking."""
     setup_settings()
     
-    qdrant_path = "./qdrant_data"
-    if not os.path.exists(qdrant_path):
-        st.error("No database found. Please run `python ingest.py` first.")
+    if not os.path.exists(QDRANT_PATH):
+        st.error(f"No database found at {QDRANT_PATH}. Run `python ingest.py` first.")
         st.stop()
         
-    client = qdrant_client.QdrantClient(path=qdrant_path)
-    vector_store = QdrantVectorStore(client=client, collection_name="tech_docs")
+    client = qdrant_client.QdrantClient(path=QDRANT_PATH)
+    vector_store = QdrantVectorStore(client=client, collection_name=COLLECTION_NAME)
     
     index = VectorStoreIndex.from_vector_store(vector_store=vector_store)
     
-    # Increase top_k to 5 to have a better chance of finding images
-    return index.as_query_engine(similarity_top_k=5)
-
-# --- Streamlit UI Setup ---
-st.set_page_config(page_title="MultiModal RAG Assistant", page_icon="🖼️", layout="wide")
-
-st.title("🖼️ MultiModal RAG: Technical Docs & Diagrams")
-st.markdown("""
-Ask questions about **AWS Services**, and this assistant will retrieve both **textual explanations** 
-and **architecture diagrams** directly from the documentation.
-""")
+    # SETUP SOTA RERANKER
+    # We retrieve 10 nodes (fast) then let the Reranker pick the top 5 (accurate)
+    rerank_postprocessor = SentenceTransformerRerank(
+        model=RERANK_MODEL_NAME, 
+        top_n=5
+    )
+    
+    return index.as_query_engine(
+        similarity_top_k=10, 
+        node_postprocessors=[rerank_postprocessor]
+    )
 
 # Initialize chat history
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Display chat messages
+# Display chat history
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
         if "images" in message:
-            for img in message["images"]:
-                st.image(img["path"], caption=img["caption"])
+            cols = st.columns(2)
+            for idx, img in enumerate(message["images"]):
+                with cols[idx % 2]:
+                    st.image(img["path"], caption=img["caption"], use_container_width=True)
 
-# Initialize Query Engine
+# Lazy Load Query Engine
 if "query_engine" not in st.session_state:
-    with st.spinner("Connecting to Vector Database and Loading Models..."):
+    with st.spinner(f"Loading {MODEL_PROVIDER} & BGE Reranker..."):
         st.session_state.query_engine = initialize_engine()
 
-# React to user input
-if prompt := st.chat_input("E.g., Show me the VPC architecture."):
+# Chat Input
+if prompt := st.chat_input("Ask about technical docs or diagrams..."):
     st.chat_message("user").markdown(prompt)
     st.session_state.messages.append({"role": "user", "content": prompt})
 
     with st.chat_message("assistant"):
-        with st.spinner("Searching docs and analyzing diagrams..."):
+        with st.spinner("🔍 Retrieving and Reranking Context..."):
             try:
-                # Step 1: Manual Retrieval (always works even if LLM is down)
-                retriever = st.session_state.query_engine._retriever
-                source_nodes = retriever.retrieve(prompt)
+                response = st.session_state.query_engine.query(prompt)
                 
-                # Step 2: Attempt LLM Query
-                try:
-                    response = st.session_state.query_engine.query(prompt)
-                    final_text = response.response
-                    final_source_nodes = response.source_nodes
-                except Exception as llm_error:
-                    if "429" in str(llm_error):
-                        final_text = "⚠️ **Quota Exceeded:** I've hit the daily limit for the Gemini AI. However, I've still retrieved the most relevant documents and diagrams for you below!"
-                    else:
-                        final_text = f"An error occurred with the AI: {llm_error}"
-                    final_source_nodes = source_nodes
+                final_text = response.response
+                source_nodes = response.source_nodes
+                
+                # Extract unique images from reranked results
+                retrieved_images = []
+                seen_paths = set()
+                for node in source_nodes:
+                    if "image_path" in node.metadata:
+                        img_path = node.metadata["image_path"]
+                        if os.path.exists(img_path) and img_path not in seen_paths:
+                            retrieved_images.append({
+                                "path": img_path,
+                                "caption": f"Retrieved (Score: {node.score:.2f}) from Page {node.metadata.get('page', '?')}"
+                            })
+                            seen_paths.add(img_path)
 
                 st.markdown(final_text)
                 
-                # Extract images from retrieved nodes
-                retrieved_images = []
-                for node in final_source_nodes:
-                    if "image_path" in node.metadata:
-                        img_path = node.metadata["image_path"]
-                        if os.path.exists(img_path):
-                            retrieved_images.append({
-                                "path": img_path,
-                                "caption": f"Retrieved Diagram from {node.metadata.get('source_pdf', 'Web Content')}"
-                            })
+                if retrieved_images:
+                    st.write("---")
+                    st.markdown("### 🖼️ Relevant Diagrams (Reranked)")
+                    cols = st.columns(2)
+                    for idx, img in enumerate(retrieved_images):
+                        with cols[idx % 2]:
+                            st.image(img["path"], caption=img["caption"], use_container_width=True)
 
-                # Display images in the chat
-                for img in retrieved_images:
-                    st.image(img["path"], caption=img["caption"])
-                
-                # Source Expanders
-                with st.expander("🔍 View Source Context & Scores"):
-                    for node in final_source_nodes:
-                        st.write(f"**Score:** {node.score:.3f}")
+                with st.expander("🔍 View Reranked Context & Confidence"):
+                    for node in source_nodes:
+                        st.write(f"**Type:** `{node.metadata.get('type', 'Unknown')}` | **Rerank Score:** `{node.score:.4f}`")
                         if "image_path" in node.metadata:
-                            st.info(f"🖼️ **Diagram Description:** {node.text}")
+                            st.info(f"🖼️ **Diagram:** {node.text}")
                         else:
-                            st.text(node.text[:500] + "...")
+                            st.text(node.text[:600] + "...")
                         st.divider()
 
-                # Add to history
                 st.session_state.messages.append({
                     "role": "assistant", 
                     "content": final_text,
                     "images": retrieved_images
                 })
+
             except Exception as e:
-                st.error(f"An error occurred: {e}")
+                st.error(f"Error: {e}")

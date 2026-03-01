@@ -26,32 +26,44 @@ A production-grade RAG system capable of retrieving and reasoning across text an
 
 ---
 
-## Phase 2: Adding the "MultiModal" (Vision) - IN PROGRESS
-**Goal:** Extract architecture diagrams from PDFs and allow Gemini to "see" them when answering.
+## Phase 2: Adding the "MultiModal" (Vision) - COMPLETED (Core)
+**Goal:** Extract architecture diagrams from PDFs and allow the model to "see" them when answering.
 
-### Planned Features
-- [ ] **Image Extraction:** Use `pdf2image` or `pdfplumber` to pull images/diagrams from documentation.
-- [ ] **Vision Ingestion:** 
-    - For every extracted image, use Gemini 1.5 Flash to generate a **textual description/caption**.
-    - Store these captions in the vector store with a reference (path/link) to the original image.
-- [ ] **MultiModal Retrieval:**
-    - Search both text chunks and image captions.
-    - If an image caption is highly relevant, retrieve the raw image.
-- [ ] **Multimodal Synthesis:**
-    - Pass the retrieved text AND the raw images to Gemini 1.5 Flash.
-    - *Example:* "Look at this diagram (Image A) and the text below. Explain how the Load Balancer connects to the EC2 instances."
-- [ ] **UI Update:** Display retrieved images directly in the Streamlit chat when they are used as context.
+### Features Implemented
+- [x] **Image Extraction:** Using `pdfplumber` for high-resolution diagram extraction.
+- [x] **SOTA Multi-Vector Ingestion:** 
+    - Descriptions generated via **LLava-v1.5 (7B)**.
+    - Captions stored as searchable nodes with pointers to raw images.
+- [x] **Vision Caching:** Persistent `caption_cache.json` to prevent re-captioning expensive images.
 
 ---
 
-## Phase 2.5: Recursive Link Ingestion (New Idea)
+## Phase 2.2: Incremental Ingestion & Persistence
+**Goal:** Optimize the pipeline to handle large document sets without full re-processing.
+
+### Features Implemented
+- [x] **MD5 Manifest System:** Track `ingestion_manifest.json` with file hashes.
+- [x] **Skip Logic:** Automatically detect unchanged PDFs, images, and web content.
+- [x] **Persistent Vector DB:** Stopped wiping the `qdrant_data` folder; the system now appends and updates.
+
+---
+
+## Phase 2.3: SOTA Retrieval Accuracy
+**Goal:** Move beyond basic vector search for enterprise-grade precision.
+
+### Features Implemented
+- [x] **Two-Stage Retrieval:** Retrieve top 10 (Vector) -> Rerank to top 5 (Cross-Encoder).
+- [x] **BGE Reranker:** Integrated `BAAI/bge-reranker-base` as a local post-processor.
+
+---
+
+## Phase 2.5: Recursive Link Ingestion - COMPLETED
 **Goal:** Expand the knowledge base by crawling external links found within the PDF documents.
 
-### Planned Features
-- [ ] **Link Extraction:** Automatically identify and extract all external URLs from the PDF source.
-- [ ] **Web Scraping:** Fetch and clean the text content from the extracted URLs.
-- [ ] **Unified Indexing:** Treat web content as first-class citizens in the vector store, linked back to the parent document.
-- [ ] **MultiModal Web Capture:** (Optional) Take screenshots of linked pages to capture diagrams not present in the PDF.
+### Features Implemented
+- [x] **Recursive Crawler:** Crawls depth=1 for documentation domains (AWS/Azure).
+- [x] **Trafilatura Integration:** High-quality text extraction that removes ads, headers, and navigation noise.
+- [x] **Unified Indexing:** Web content is treated as first-class context in the RAG pipeline.
 
 ---
 
